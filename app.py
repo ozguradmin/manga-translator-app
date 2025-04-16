@@ -131,29 +131,21 @@ def get_optimal_font_size(draw, text, box_width, box_height, font_path="manga_fo
     return best_font, best_size, best_wrapped
 
 # --- Gemini API'ye gönderilecek görseli yeniden boyutlandıran fonksiyon ---
-from PIL import ImageOps
 MAX_API_IMAGE_SIZE = 1000
-MIN_ASPECT_RATIO = 0.6   # Çok dar ise padding uygula
-MAX_ASPECT_RATIO = 1.8   # Çok uzun ise padding uygula
 
 def resize_for_api(img):
     img_api = img.copy()
-    aspect_ratio = img_api.width / img_api.height
-    if aspect_ratio < MIN_ASPECT_RATIO:
-        # Çok dar, yanlara padding ekle
-        new_width = int(img_api.height * MIN_ASPECT_RATIO)
-        result = Image.new("RGB", (new_width, img_api.height), (255,255,255))
-        result.paste(img_api, ((new_width - img_api.width)//2, 0))
-        img_api = result
-    elif aspect_ratio > MAX_ASPECT_RATIO:
-        # Çok uzun, üst-alt padding ekle
-        new_height = int(img_api.width / MAX_ASPECT_RATIO)
-        result = Image.new("RGB", (img_api.width, new_height), (255,255,255))
-        result.paste(img_api, (0, (new_height - img_api.height)//2))
-        img_api = result
-    # Sonra boyutlandır
-    if img_api.width > MAX_API_IMAGE_SIZE or img_api.height > MAX_API_IMAGE_SIZE:
-        img_api.thumbnail((MAX_API_IMAGE_SIZE, MAX_API_IMAGE_SIZE))
+    w, h = img_api.size
+    if w > h:
+        if w > MAX_API_IMAGE_SIZE:
+            new_w = MAX_API_IMAGE_SIZE
+            new_h = int(h * (MAX_API_IMAGE_SIZE / w))
+            img_api = img_api.resize((new_w, new_h), Image.LANCZOS)
+    else:
+        if h > MAX_API_IMAGE_SIZE:
+            new_h = MAX_API_IMAGE_SIZE
+            new_w = int(w * (MAX_API_IMAGE_SIZE / h))
+            img_api = img_api.resize((new_w, new_h), Image.LANCZOS)
     return img_api
 
 # --- Dosya Yükleme ve Sayfa Çıkarma ---
