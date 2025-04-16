@@ -147,22 +147,26 @@ def extract_images_from_file(uploaded_file):
                     img = Image.open(io.BytesIO(archive.read(name))).convert("RGB")
                     images.append(img)
     elif filename.endswith('.rar') or filename.endswith('.cbr'):
+        # Önce ZIP olarak dene (bazı .cbr dosyaları aslında zip'tir)
         try:
-            with rarfile.RarFile(uploaded_file) as archive:
+            with zipfile.ZipFile(uploaded_file) as archive:
                 for name in sorted(archive.namelist()):
                     if name.lower().endswith(('.jpg', '.jpeg', '.png')):
                         img = Image.open(io.BytesIO(archive.read(name))).convert("RGB")
                         images.append(img)
-        except rarfile.NotRarFile:
-            # Belki de bu dosya aslında bir zip arşividir
+            return images
+        except Exception:
+            uploaded_file.seek(0)  # ZIP denemesi dosya pointer'ını oynatır, sıfırla
             try:
-                with zipfile.ZipFile(uploaded_file) as archive:
+                with rarfile.RarFile(uploaded_file) as archive:
                     for name in sorted(archive.namelist()):
                         if name.lower().endswith(('.jpg', '.jpeg', '.png')):
                             img = Image.open(io.BytesIO(archive.read(name))).convert("RGB")
                             images.append(img)
-            except Exception:
-                st.error("CBR dosyası açılamadı. Dosya bozuk olabilir veya RAR/ZIP formatında değildir.")
+                return images
+            except Exception as e:
+                st.error("CBR dosyası açılamadı. Dosya bozuk olabilir veya sunucuda RAR desteği yok. Hata: " + str(e))
+                return []
     elif filename.endswith(('.jpg', '.jpeg', '.png')):
         img = Image.open(uploaded_file).convert("RGB")
         images.append(img)
