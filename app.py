@@ -14,14 +14,7 @@ import json
 
 
 # --- API Anahtar Listesi ---
-API_KEYS = [
-    "AIzaSyAYN0kchg5scMw0Xn0BxM-t51XhqAaN3Jc",
-    "AIzaSyB8pRKjomrBkKELh-cDtuD8sqzFflwUdoA",
-    "AIzaSyDIstqqMAlS1EGHZCBWvy98ueqejrHN8C4",
-    "AIzaSyCcu5GLciG4rdT8FftRnk7NKS06qaehn8Q",
-    "AIzaSyBkGFGkPtUIJV07dolTA61iDCVCX8Satl4",
-    "AIzaSyAE3oQi4Zwb7YBiJ2zX5K3HcogcJxwpH9g",
-]
+API_KEYS = st.secrets["API_KEYS"]
 
 st.set_page_config(layout="wide")
 st.title("Manga Okuma ve Otomatik Çeviri (Gemini)")
