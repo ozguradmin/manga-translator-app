@@ -139,6 +139,16 @@ def resize_for_api(img):
         img_api.thumbnail((MAX_API_IMAGE_SIZE, MAX_API_IMAGE_SIZE))
     return img_api
 
+# --- Görseli kareye tamamlayan padding fonksiyonu ---
+def pad_to_square(img, color=(255,255,255)):
+    w, h = img.size
+    if w == h:
+        return img
+    size = max(w, h)
+    new_img = Image.new("RGB", (size, size), color)
+    new_img.paste(img, ((size - w) // 2, (size - h) // 2))
+    return new_img
+
 # --- Dosya Yükleme ve Sayfa Çıkarma ---
 def extract_images_from_file(uploaded_file):
     image_paths = []
@@ -198,8 +208,10 @@ def extract_images_from_file(uploaded_file):
 
 # --- Görsel Yükleme ---
 uploaded_file = st.file_uploader(
-    "Bir manga dosyası veya görsel yükleyin (PDF, ZIP, CBZ, CBR, JPG, PNG)"
-    # type parametresini kaldırdık!
+    "Bir manga dosyası veya görsel yükleyin (PDF, ZIP, CBZ, CBR, JPG, PNG)",
+    type=["pdf", "zip", "cbz", "cbr", "jpg", "jpeg", "png"],
+    label_visibility="visible",
+    help="Buraya dosya sürükleyip bırakabilir veya dosya seçebilirsiniz."
 )
 
 if uploaded_file:
@@ -221,7 +233,7 @@ if uploaded_file:
             placeholder.image(page['translated_img_path'], use_container_width=True)
             continue
         # --- Gemini ile metin tespiti ve çeviri ---
-        img_api = resize_for_api(img)
+        img_api = pad_to_square(resize_for_api(img))
         prompt_detection = (
             "Bu görseldeki konuşma balonları veya mantıksal olarak bağlantılı metin grupları gibi metin bloklarını tespit et. "
             "Her blok için: "
