@@ -12,32 +12,13 @@ import fitz  # PyMuPDF
 import rarfile
 import base64
 import tempfile
-import requests
-
-DEEPL_API_KEY = "ac79cb04-eb2d-4a1f-8a69-1d7012672d4c:fx"
-
-def translate_with_deepl(text, source_lang="EN", target_lang="TR"):
-    url = "https://api-free.deepl.com/v2/translate"
-    headers = {"Authorization": f"DeepL-Auth-Key {DEEPL_API_KEY}"}
-    data = {
-        "text": text,
-        "source_lang": source_lang,
-        "target_lang": target_lang
-    }
-    response = requests.post(url, data=data, headers=headers)
-    if response.status_code == 200:
-        result = response.json()
-        return result["translations"][0]["text"]
-    else:
-        st.error(f"DeepL API Hatası: {response.text}")
-        return ""
 
 # --- API Anahtar Listesi ---
 API_KEYS = st.secrets["API_KEYS"]
 
 # --- Sayfa ve Başlık Ayarları ---
 st.set_page_config(layout="wide")
-st.title("Manga Okuma ve Otomatik Çeviri (Gemini)")
+st.title("Manga Okuma ve Otomatik Çeviri")
 
 # --- Oturum Durumu Başlatma ---
 if 'current_api_key_index' not in st.session_state:
@@ -54,7 +35,7 @@ st.sidebar.title("Ayarlar ve Loglar")
 # Bu alan şimdilik sadece bilgilendirme amaçlı veya geçici anahtar eklemek için kullanılabilir.
 api_key_display = st.sidebar.text_input(
     "Aktif API Anahtarı (Başlangıç)",
-    value=DEEPL_API_KEY,
+    value=API_KEYS[st.session_state.current_api_key_index][:8] + "...", # Anahtarın sadece başını göster
     disabled=True, # Şimdilik değiştirmeyi kapatalım
     help="API anahtarı listesi kod içinde tanımlıdır ve hız limitine takıldıkça otomatik değişir."
 )
@@ -70,10 +51,18 @@ def add_log(message):
 
 # --- Gemini Yapılandırma Fonksiyonu ---
 def configure_gemini(key_index):
-    selected_key = API_KEYS[key_index]
-    genai.configure(api_key=selected_key)
-    model = genai.GenerativeModel('gemini-1.5-pro-latest')
-    return model
+    """Belirtilen index'teki API anahtarı ile Gemini'yi yapılandırır."""
+    try:
+        selected_key = API_KEYS[key_index]
+        genai.configure(api_key=selected_key)
+        model = genai.GenerativeModel('gemini-1.5-pro-latest')
+        add_log(f"Gemini API yapılandırıldı. Anahtar Index: {key_index} (***{selected_key[-4:]})")
+        # Aktif anahtar gösterimini güncelle (opsiyonel)
+        # api_key_display.text_input("Aktif API Anahtarı", value=selected_key[:8] + "...", disabled=True, key=f"api_disp_{key_index}")
+        return model
+    except Exception as e:
+        add_log(f"HATA: API Anahtarı Index {key_index} ile yapılandırma başarısız: {e}")
+        return None
 
 # --- API Çağrısı Yardımcı Fonksiyonu (Retry ve Key Cycling ile) ---
 def call_gemini_with_retry(model, content, max_retries=len(API_KEYS) + 2, initial_delay=3):
@@ -200,7 +189,7 @@ def extract_images_from_file(uploaded_file):
 
 # --- Görsel Yükleme ---
 uploaded_file = st.file_uploader(
-    "Bir manga dosyası veya görsel yükleyin (PDF, ZIP, CBZ, CBR, JPG, PNG)",
+    "Bir manga dosyası veya görsel yükleyin (PDF, ZIP, CBZ, CBR, JPG, PNG) yapımcı: @ozguradmin",
     type=["pdf", "zip", "cbz", "cbr", "jpg", "jpeg", "png"],
     label_visibility="visible",
     help="Buraya dosya sürükleyip bırakabilir veya dosya seçebilirsiniz."
@@ -224,7 +213,7 @@ if uploaded_file:
             placeholder.markdown(f"### Sayfa {idx+1}")
             placeholder.image(page['translated_img_path'], use_container_width=True)
             continue
-        # --- Metin tespiti (Gemini ile) ---
+        # --- Gemini ile metin tespiti ve çeviri ---
         prompt_detection = (
             "Bu görseldeki konuşma balonları veya mantıksal olarak bağlantılı metin grupları gibi metin bloklarını tespit et. "
             "Her blok için: "
@@ -255,19 +244,20 @@ if uploaded_file:
             placeholder.image(img, use_container_width=True)
             placeholder.markdown(f'<div style="position:relative;top:-60px;left:0;width:100%;height:60px;background:rgba(255,0,0,0.2);text-align:center;font-size:18px;">Hata: JSON ayrıştırma hatası: {e}</div>', unsafe_allow_html=True)
             continue
-        # Toplu çeviri (DeepL ile)
+        # Toplu çeviri
         all_texts = [item.get('text', '') for item in detected_items]
         joined_text = '\n---\n'.join(all_texts)
-        try:
-            translated_text = translate_with_deepl(joined_text, source_lang="EN", target_lang="TR")
-            translated_blocks = [b.strip() for b in translated_text.split('---')]
-        except Exception as e:
+        prompt_translation = f"Aşağıdaki metin bloklarını Türkçeye çevir. Her blok arasını --- ile ayırdım, sen de çeviride blokları aynı sırayla --- ile ayırarak döndür:\n\n{joined_text}"
+        response_translation = call_gemini_with_retry(model, prompt_translation)
+        if response_translation is None:
             page['status'] = 'error'
-            page['log'] = f'DeepL çeviri hatası: {e}'
+            page['log'] = 'Çeviri başarısız.'
             placeholder.markdown(f"### Sayfa {idx+1}")
             placeholder.image(img, use_container_width=True)
-            placeholder.markdown('<div style="position:relative;top:-60px;left:0;width:100%;height:60px;background:rgba(255,0,0,0.2);text-align:center;font-size:18px;">Hata: DeepL çeviri hatası.</div>', unsafe_allow_html=True)
+            placeholder.markdown('<div style="position:relative;top:-60px;left:0;width:100%;height:60px;background:rgba(255,0,0,0.2);text-align:center;font-size:18px;">Hata: Çeviri başarısız.</div>', unsafe_allow_html=True)
             continue
+        translated_text = response_translation.text.strip()
+        translated_blocks = [b.strip() for b in translated_text.split('---')]
         processed_img = img.convert("RGBA")
         draw = ImageDraw.Draw(processed_img)
         font_path = "CCComicrazy.ttf"
@@ -295,12 +285,14 @@ if uploaded_file:
             text_x = left + (text_box_width - text_width) / 2
             text_y = top + (text_box_height - text_height) / 2
             draw.multiline_text((text_x, text_y), wrapped, fill=(0,0,0,255), font=font, spacing=4, align="center")
+        # Çevrilen görseli tekrar temp dosyaya kaydet
         temp_trans = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
         processed_img.convert("RGB").save(temp_trans, format="PNG")
         temp_trans.close()
         page['translated_img_path'] = temp_trans.name
         page['status'] = 'done'
         page['log'] = 'Çeviri tamamlandı.'
+        # Çevrilen sayfayı hemen göster (base64 ile birleşik gösterim)
         buffered = io.BytesIO()
         processed_img.save(buffered, format="PNG")
         img_str = base64.b64encode(buffered.getvalue()).decode()
@@ -364,7 +356,7 @@ if uploaded_file:
 
 # İlk log mesajını göster (API anahtarı bekleniyor veya uygulama hazır)
 if not st.session_state.logs:
-    if not DEEPL_API_KEY:
+    if not API_KEYS:
          add_log("Uygulama başlatıldı. API anahtarları bekleniyor...")
     else:
          add_log("Uygulama hazır. Görsel bekleniyor...") 
