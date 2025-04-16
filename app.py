@@ -224,7 +224,7 @@ if uploaded_file:
             draw = ImageDraw.Draw(processed_img)
             text_box_width = right - left
             text_box_height = bottom - top
-            font_path = "fonts/CCComicrazy.ttf"
+            font_path = "CCComicrazy.ttf"
             font, font_size, wrapped = get_optimal_font_size(draw, cleaned_translation, text_box_width, text_box_height, font_path)
             bbox = draw.multiline_textbbox((0, 0), wrapped, font=font, spacing=4)
             text_width = bbox[2] - bbox[0]
