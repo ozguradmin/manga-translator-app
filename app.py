@@ -18,7 +18,7 @@ API_KEYS = st.secrets["API_KEYS"]
 
 # --- Sayfa ve Başlık Ayarları ---
 st.set_page_config(layout="wide")
-st.title("Manga Okuma ve Otomatik Çeviri (ozguradmin)")
+st.title("Manga Okuma ve Otomatik Çeviri")
 
 # --- Oturum Durumu Başlatma ---
 if 'current_api_key_index' not in st.session_state:
@@ -189,7 +189,7 @@ def extract_images_from_file(uploaded_file):
 
 # --- Görsel Yükleme ---
 uploaded_file = st.file_uploader(
-    "Bir manga dosyası veya görsel yükleyin (PDF, ZIP, CBZ, CBR, JPG, PNG)",
+    "Bir manga dosyası veya görsel yükleyin (PDF, ZIP, CBZ, CBR, JPG, PNG) yapımcı: @ozguradmin",
     type=["pdf", "zip", "cbz", "cbr", "jpg", "jpeg", "png"],
     label_visibility="visible",
     help="Buraya dosya sürükleyip bırakabilir veya dosya seçebilirsiniz."
