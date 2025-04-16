@@ -2,49 +2,70 @@ import streamlit as st
 import google.generativeai as genai
 from PIL import Image, ImageDraw, ImageFont
 import io
+import json
 import os
-import re
+import re # Regex modülünü import et
 import time
 import textwrap
 import zipfile
 import fitz  # PyMuPDF
 import rarfile
 import base64
-import json
-
 
 # --- API Anahtar Listesi ---
 API_KEYS = st.secrets["API_KEYS"]
 
+# --- Sayfa ve Başlık Ayarları ---
 st.set_page_config(layout="wide")
 st.title("Manga Okuma ve Otomatik Çeviri (Gemini)")
 
+# --- Oturum Durumu Başlatma ---
 if 'current_api_key_index' not in st.session_state:
     st.session_state.current_api_key_index = 0
 if 'logs' not in st.session_state:
     st.session_state.logs = []
 if 'page_states' not in st.session_state:
-    st.session_state.page_states = {}
+    st.session_state.page_states = {}  # {page_idx: {'status': 'pending'/'done'/'error', 'img': img, 'translated_img': img, 'log': ...}}
 
-st.sidebar.title("Log Kayıtları")
+# --- Kenar Çubuğu Ayarları ---
+st.sidebar.title("Ayarlar ve Loglar")
+
+# API Anahtarı Girişi (Varsayılan olarak ilk anahtarı gösterir, ancak ana mantık listeyi kullanır)
+# Bu alan şimdilik sadece bilgilendirme amaçlı veya geçici anahtar eklemek için kullanılabilir.
+api_key_display = st.sidebar.text_input(
+    "Aktif API Anahtarı (Başlangıç)",
+    value=API_KEYS[st.session_state.current_api_key_index][:8] + "...", # Anahtarın sadece başını göster
+    disabled=True, # Şimdilik değiştirmeyi kapatalım
+    help="API anahtarı listesi kod içinde tanımlıdır ve hız limitine takıldıkça otomatik değişir."
+)
+
+# Log Alanı
+st.sidebar.subheader("Log Kayıtları")
 log_area = st.sidebar.empty()
+
 def add_log(message):
+    """Log listesine mesaj ekler ve alanı günceller."""
     st.session_state.logs.append(message)
     log_area.text_area("Log Mesajları", "\n".join(st.session_state.logs), height=250)
 
-# --- Gemini API Key Cycling ---
+# --- Gemini Yapılandırma Fonksiyonu ---
 def configure_gemini(key_index):
+    """Belirtilen index'teki API anahtarı ile Gemini'yi yapılandırır."""
     try:
         selected_key = API_KEYS[key_index]
         genai.configure(api_key=selected_key)
         model = genai.GenerativeModel('gemini-1.5-pro-latest')
         add_log(f"Gemini API yapılandırıldı. Anahtar Index: {key_index} (***{selected_key[-4:]})")
+        # Aktif anahtar gösterimini güncelle (opsiyonel)
+        # api_key_display.text_input("Aktif API Anahtarı", value=selected_key[:8] + "...", disabled=True, key=f"api_disp_{key_index}")
         return model
     except Exception as e:
         add_log(f"HATA: API Anahtarı Index {key_index} ile yapılandırma başarısız: {e}")
         return None
 
+# --- API Çağrısı Yardımcı Fonksiyonu (Retry ve Key Cycling ile) ---
 def call_gemini_with_retry(model, content, max_retries=len(API_KEYS) + 2, initial_delay=3):
+    """Gemini API'yi çağırır, 429 hatasında anahtar değiştirerek ve bekleyerek tekrar dener."""
     current_model = model
     delay = initial_delay
     for attempt in range(max_retries):
@@ -54,7 +75,7 @@ def call_gemini_with_retry(model, content, max_retries=len(API_KEYS) + 2, initia
         try:
             response = current_model.generate_content(content)
             add_log("API çağrısı başarılı.")
-            return response
+            return response # Başarılı olursa yanıtı döndür
         except Exception as e:
             if '429' in str(e):
                 add_log(f"429 Hatası (Anahtar Index: {st.session_state.current_api_key_index}). Detay: {e}")
@@ -62,15 +83,51 @@ def call_gemini_with_retry(model, content, max_retries=len(API_KEYS) + 2, initia
                 add_log(f"Sıradaki API anahtarına geçiliyor: Index {st.session_state.current_api_key_index}. {delay}sn bekleniyor...")
                 time.sleep(delay)
                 current_model = configure_gemini(st.session_state.current_api_key_index)
-                delay = min(delay * 1.5, 15)
-                continue
+                delay = min(delay * 1.5, 15) # Gecikmeyi biraz artır
+                continue # Yeni anahtarla tekrar dene
             else:
                 add_log(f"API çağrısı sırasında beklenmeyen hata (Anahtar Index: {st.session_state.current_api_key_index}): {e}")
-                return None
+                return None # Diğer hatalarda None döndür
     add_log(f"HATA: API çağrısı {max_retries} denemeden sonra başarısız oldu.")
     return None
 
+# --- İlk Model Yapılandırması ---
 model = configure_gemini(st.session_state.current_api_key_index)
+
+# --- Yardımcı Fonksiyon: Optimal Font Boyutunu Bulma (İyileştirildi v2) ---
+def get_optimal_font_size(draw, text, box_width, box_height, font_path="manga_font.ttf", max_font_size=100, min_font_size=8, padding=0):
+    """Verilen kutuya metni sığdıracak en büyük font boyutunu ve wrap edilmiş halini döndürür."""
+    add_log(f"Font Boyutu Hesaplama Başladı: Kutu({box_width:.0f}x{box_height:.0f}), MaxSize={max_font_size}, MinSize={min_font_size}, İçPadding={padding}")
+    best_font = None
+    best_size = min_font_size
+    best_wrapped = text
+    for font_size in range(max_font_size, min_font_size - 1, -1):
+        try:
+            font = ImageFont.truetype(font_path, font_size)
+        except IOError:
+            try:
+                font = ImageFont.load_default(size=font_size)
+            except Exception:
+                font = ImageFont.load_default()
+        # Satır uzunluğunu fonta ve kutuya göre tahmini ayarla
+        max_chars_per_line = max(1, int(box_width // (font_size * 0.6)))
+        wrapped = textwrap.fill(text, width=max_chars_per_line)
+        bbox = draw.multiline_textbbox((0, 0), wrapped, font=font, spacing=4)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
+        if text_width <= box_width - 2 * padding and text_height <= box_height - 2 * padding:
+            best_font = font
+            best_size = font_size
+            best_wrapped = wrapped
+            break
+    if best_font is None:
+        best_font = ImageFont.truetype(font_path, min_font_size) if font_path else ImageFont.load_default()
+        best_size = min_font_size
+        max_chars_per_line = max(1, int(box_width // (min_font_size * 0.6)))
+        best_wrapped = textwrap.fill(text, width=max_chars_per_line)
+        add_log(f"UYARI: Kutu çok küçük! Font minimumda ({min_font_size}).")
+    add_log(f"Font Boyutu Hesaplama Bitti: Son Boyut={best_size}")
+    return best_font, best_size, best_wrapped
 
 # --- Dosya Yükleme ve Sayfa Çıkarma ---
 def extract_images_from_file(uploaded_file):
@@ -90,50 +147,30 @@ def extract_images_from_file(uploaded_file):
                     img = Image.open(io.BytesIO(archive.read(name))).convert("RGB")
                     images.append(img)
     elif filename.endswith('.rar') or filename.endswith('.cbr'):
-        with rarfile.RarFile(uploaded_file) as archive:
-            for name in sorted(archive.namelist()):
-                if name.lower().endswith(('.jpg', '.jpeg', '.png')):
-                    img = Image.open(io.BytesIO(archive.read(name))).convert("RGB")
-                    images.append(img)
+        try:
+            with rarfile.RarFile(uploaded_file) as archive:
+                for name in sorted(archive.namelist()):
+                    if name.lower().endswith(('.jpg', '.jpeg', '.png')):
+                        img = Image.open(io.BytesIO(archive.read(name))).convert("RGB")
+                        images.append(img)
+        except rarfile.NotRarFile:
+            # Belki de bu dosya aslında bir zip arşividir
+            try:
+                with zipfile.ZipFile(uploaded_file) as archive:
+                    for name in sorted(archive.namelist()):
+                        if name.lower().endswith(('.jpg', '.jpeg', '.png')):
+                            img = Image.open(io.BytesIO(archive.read(name))).convert("RGB")
+                            images.append(img)
+            except Exception:
+                st.error("CBR dosyası açılamadı. Dosya bozuk olabilir veya RAR/ZIP formatında değildir.")
     elif filename.endswith(('.jpg', '.jpeg', '.png')):
         img = Image.open(uploaded_file).convert("RGB")
         images.append(img)
     return images
 
-# --- Font Boyutu Hesaplama ---
-def get_optimal_font_size(draw, text, box_width, box_height, font_path="manga_font.ttf", max_font_size=100, min_font_size=8, padding=0):
-    best_font = None
-    best_size = min_font_size
-    best_wrapped = text
-    for font_size in range(max_font_size, min_font_size - 1, -1):
-        try:
-            font = ImageFont.truetype(font_path, font_size)
-        except IOError:
-            try:
-                font = ImageFont.load_default(size=font_size)
-            except Exception:
-                font = ImageFont.load_default()
-        max_chars_per_line = max(1, int(box_width // (font_size * 0.6)))
-        wrapped = textwrap.fill(text, width=max_chars_per_line)
-        bbox = draw.multiline_textbbox((0, 0), wrapped, font=font, spacing=4)
-        text_width = bbox[2] - bbox[0]
-        text_height = bbox[3] - bbox[1]
-        if text_width <= box_width - 2 * padding and text_height <= box_height - 2 * padding:
-            best_font = font
-            best_size = font_size
-            best_wrapped = wrapped
-            break
-    if best_font is None:
-        best_font = ImageFont.truetype(font_path, min_font_size) if font_path else ImageFont.load_default()
-        best_size = min_font_size
-        max_chars_per_line = max(1, int(box_width // (min_font_size * 0.6)))
-        best_wrapped = textwrap.fill(text, width=max_chars_per_line)
-    return best_font, best_size, best_wrapped
-
 # --- Görsel Yükleme ---
 uploaded_file = st.file_uploader(
     "Bir manga dosyası veya görsel yükleyin (PDF, ZIP, CBZ, CBR, JPG, PNG)"
-    # type parametresini kaldırdık!
 )
 
 if uploaded_file:
@@ -146,15 +183,16 @@ if uploaded_file:
 
     st.success(f"{len(images)} sayfa yüklendi. Çeviri işlemi başlatılıyor...")
 
+    # --- Sayfa Sayfa Çeviri ---
     for idx, page in st.session_state.page_states.items():
         img = page['img']
         placeholder = page_placeholders[idx]
         if page['status'] == 'done':
-            buffered = io.BytesIO()
-            page['translated_img'].save(buffered, format="PNG")
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-            placeholder.markdown(f"<img src='data:image/png;base64,{img_str}' style='display:block;margin:0;padding:0;border:none;width:100%;'>", unsafe_allow_html=True)
+            # Zaten çevrilmişse göster
+            placeholder.markdown(f"### Sayfa {idx+1}")
+            placeholder.image(page['translated_img'], use_container_width=True)
             continue
+        # --- Gemini ile metin tespiti ve çeviri ---
         prompt_detection = (
             "Bu görseldeki konuşma balonları veya mantıksal olarak bağlantılı metin grupları gibi metin bloklarını tespit et. "
             "Her blok için: "
@@ -170,10 +208,8 @@ if uploaded_file:
             page['status'] = 'error'
             page['log'] = 'Gemini API yanıtı boş geldi.'
             add_log('UYARI: Gemini API yanıtı boş geldi, JSON ayrıştırma yapılmadı.')
-            buffered = io.BytesIO()
-            img.save(buffered, format="PNG")
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-            placeholder.markdown(f"<img src='data:image/png;base64,{img_str}' style='display:block;margin:0;padding:0;border:none;width:100%;'>", unsafe_allow_html=True)
+            placeholder.markdown(f"### Sayfa {idx+1}")
+            placeholder.image(img, use_container_width=True)
             placeholder.markdown('<div style="position:relative;top:-60px;left:0;width:100%;height:60px;background:rgba(255,0,0,0.2);text-align:center;font-size:18px;">Hata: Gemini API yanıtı boş geldi.</div>', unsafe_allow_html=True)
             continue
         cleaned_json_str = re.sub(r",\s*([}\]])", r"\1", text_response)
@@ -183,12 +219,11 @@ if uploaded_file:
             page['status'] = 'error'
             page['log'] = f'JSON ayrıştırma hatası: {e}'
             add_log(f'HATA: JSON ayrıştırma hatası: {e}\nYanıt: {cleaned_json_str}')
-            buffered = io.BytesIO()
-            img.save(buffered, format="PNG")
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-            placeholder.markdown(f"<img src='data:image/png;base64,{img_str}' style='display:block;margin:0;padding:0;border:none;width:100%;'>", unsafe_allow_html=True)
+            placeholder.markdown(f"### Sayfa {idx+1}")
+            placeholder.image(img, use_container_width=True)
             placeholder.markdown(f'<div style="position:relative;top:-60px;left:0;width:100%;height:60px;background:rgba(255,0,0,0.2);text-align:center;font-size:18px;">Hata: JSON ayrıştırma hatası: {e}</div>', unsafe_allow_html=True)
             continue
+        # Toplu çeviri
         all_texts = [item.get('text', '') for item in detected_items]
         joined_text = '\n---\n'.join(all_texts)
         prompt_translation = f"Aşağıdaki metin bloklarını Türkçeye çevir. Her blok arasını --- ile ayırdım, sen de çeviride blokları aynı sırayla --- ile ayırarak döndür:\n\n{joined_text}"
@@ -196,15 +231,15 @@ if uploaded_file:
         if response_translation is None:
             page['status'] = 'error'
             page['log'] = 'Çeviri başarısız.'
-            buffered = io.BytesIO()
-            img.save(buffered, format="PNG")
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-            placeholder.markdown(f"<img src='data:image/png;base64,{img_str}' style='display:block;margin:0;padding:0;border:none;width:100%;'>", unsafe_allow_html=True)
+            placeholder.markdown(f"### Sayfa {idx+1}")
+            placeholder.image(img, use_container_width=True)
             placeholder.markdown('<div style="position:relative;top:-60px;left:0;width:100%;height:60px;background:rgba(255,0,0,0.2);text-align:center;font-size:18px;">Hata: Çeviri başarısız.</div>', unsafe_allow_html=True)
             continue
         translated_text = response_translation.text.strip()
         translated_blocks = [b.strip() for b in translated_text.split('---')]
         processed_img = img.convert("RGBA")
+        draw = ImageDraw.Draw(processed_img)
+        font_path = r"C:/Users/ozgur/OneDrive/Masaüstü/kodlarrr/CCComicrazy.ttf"
         for i, item in enumerate(detected_items):
             box = item.get('box')
             cleaned_translation = translated_blocks[i] if i < len(translated_blocks) else "Çeviri hatası"
@@ -213,6 +248,8 @@ if uploaded_file:
             top = ymin * img.height / 1000
             right = xmax * img.width / 1000
             bottom = ymax * img.height / 1000
+            rect_radius = 0  # Border-radius sıfırlandı
+            # Şeffaf overlay oluştur
             overlay = Image.new("RGBA", processed_img.size, (255,255,255,0))
             overlay_draw = ImageDraw.Draw(overlay)
             overlay_draw.rectangle([left, top, right, bottom], fill=(255,255,255,180))
@@ -220,7 +257,6 @@ if uploaded_file:
             draw = ImageDraw.Draw(processed_img)
             text_box_width = right - left
             text_box_height = bottom - top
-            font_path = "CCComicrazy.ttf"
             font, font_size, wrapped = get_optimal_font_size(draw, cleaned_translation, text_box_width, text_box_height, font_path)
             bbox = draw.multiline_textbbox((0, 0), wrapped, font=font, spacing=4)
             text_width = bbox[2] - bbox[0]
@@ -231,10 +267,28 @@ if uploaded_file:
         page['translated_img'] = processed_img.convert("RGB")
         page['status'] = 'done'
         page['log'] = 'Çeviri tamamlandı.'
+        # Çevrilen sayfayı hemen göster (base64 ile birleşik gösterim)
         buffered = io.BytesIO()
         page['translated_img'].save(buffered, format="PNG")
         img_str = base64.b64encode(buffered.getvalue()).decode()
         placeholder.markdown(f"<img src='data:image/png;base64,{img_str}' style='display:block;margin:0;padding:0;border:none;width:100%;'>", unsafe_allow_html=True)
+
+    # Henüz çevrilmeyen sayfalar için overlay göster (base64 ile)
+    for idx, page in st.session_state.page_states.items():
+        if page['status'] == 'pending':
+            page_placeholders[idx].markdown(f"### Sayfa {idx+1}")
+            buffered = io.BytesIO()
+            page['img'].save(buffered, format="PNG")
+            img_str = base64.b64encode(buffered.getvalue()).decode()
+            page_placeholders[idx].markdown(f"<img src='data:image/png;base64,{img_str}' style='display:block;margin:0;padding:0;border:none;width:100%;'>", unsafe_allow_html=True)
+            page_placeholders[idx].markdown('<div style="position:relative;top:-60px;left:0;width:100%;height:60px;background:rgba(255,255,255,0.7);text-align:center;font-size:24px;">Henüz çevrilmedi, lütfen bekleyin...</div>', unsafe_allow_html=True)
+        elif page['status'] == 'error':
+            page_placeholders[idx].markdown(f"### Sayfa {idx+1}")
+            buffered = io.BytesIO()
+            page['img'].save(buffered, format="PNG")
+            img_str = base64.b64encode(buffered.getvalue()).decode()
+            page_placeholders[idx].markdown(f"<img src='data:image/png;base64,{img_str}' style='display:block;margin:0;padding:0;border:none;width:100%;'>", unsafe_allow_html=True)
+            page_placeholders[idx].markdown(f'<div style="position:relative;top:-60px;left:0;width:100%;height:60px;background:rgba(255,0,0,0.2);text-align:center;font-size:18px;">Hata: {page["log"]}</div>', unsafe_allow_html=True)
 
     # --- İNDİRME BUTONU (her zaman en altta ve her zaman göster, PDF olarak) ---
     def create_pdf_of_translated_pages():
@@ -271,4 +325,11 @@ if uploaded_file:
             file_name="cevrilen_sayfalar.pdf",
             mime="application/pdf",
             disabled=True
-        ) 
+        )
+
+# İlk log mesajını göster (API anahtarı bekleniyor veya uygulama hazır)
+if not st.session_state.logs:
+    if not API_KEYS:
+         add_log("Uygulama başlatıldı. API anahtarları bekleniyor...")
+    else:
+         add_log("Uygulama hazır. Görsel bekleniyor...") 
