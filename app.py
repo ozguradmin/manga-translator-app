@@ -255,12 +255,14 @@ if uploaded_file:
             placeholder.image(img, use_container_width=True)
             placeholder.markdown(f'<div style="position:relative;top:-60px;left:0;width:100%;height:60px;background:rgba(255,0,0,0.2);text-align:center;font-size:18px;">Hata: JSON ayrıştırma hatası: {e}</div>', unsafe_allow_html=True)
             continue
-        # Her balonun metni birleştirilip DeepL'ye tek parça olarak gönderilecek
+        # Her balonun metni birleştirilip DeepL'ye tek parça olarak gönderilecek (satır sonları boşluğa çevrilerek)
         translated_blocks = []
         for item in detected_items:
             metin = item.get('text', '')
             if isinstance(metin, list):
-                metin = '\n'.join(metin)
+                metin = ' '.join(metin)
+            else:
+                metin = metin.replace('\n', ' ')
             ceviri = "Çeviri hatası"
             try:
                 ceviri = translate_with_deepl(metin, source_lang="EN", target_lang="TR")
