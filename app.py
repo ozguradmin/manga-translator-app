@@ -243,7 +243,7 @@ if uploaded_file:
         translated_blocks = [b.strip() for b in translated_text.split('---')]
         processed_img = img.convert("RGBA")
         draw = ImageDraw.Draw(processed_img)
-        font_path = r"C:/Users/ozgur/OneDrive/Masaüstü/kodlarrr/CCComicrazy.ttf"
+        font_path = "CCComicrazy.ttf"
         for i, item in enumerate(detected_items):
             box = item.get('box')
             cleaned_translation = translated_blocks[i] if i < len(translated_blocks) else "Çeviri hatası"
