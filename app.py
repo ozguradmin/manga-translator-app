@@ -33,8 +33,7 @@ def translate_with_deepl(text, source_lang="EN", target_lang="TR"):
         return ""
 
 # --- API Anahtar Listesi ---
-# Gemini ile ilgili anahtar ve fonksiyonlar kaldırıldı
-# API_KEYS = st.secrets["API_KEYS"]
+API_KEYS = st.secrets["API_KEYS"]
 
 # --- Sayfa ve Başlık Ayarları ---
 st.set_page_config(layout="wide")
@@ -71,21 +70,13 @@ def add_log(message):
 
 # --- Gemini Yapılandırma Fonksiyonu ---
 def configure_gemini(key_index):
-    """Belirtilen index'teki API anahtarı ile Gemini'yi yapılandırır."""
-    try:
-        selected_key = DEEPL_API_KEY
-        genai.configure(api_key=selected_key)
-        model = genai.GenerativeModel('gemini-1.5-pro-latest')
-        add_log(f"Gemini API yapılandırıldı. Anahtar Index: {key_index} (***{selected_key[-4:]})")
-        # Aktif anahtar gösterimini güncelle (opsiyonel)
-        # api_key_display.text_input("Aktif API Anahtarı", value=selected_key[:8] + "...", disabled=True, key=f"api_disp_{key_index}")
-        return model
-    except Exception as e:
-        add_log(f"HATA: API Anahtarı Index {key_index} ile yapılandırma başarısız: {e}")
-        return None
+    selected_key = API_KEYS[key_index]
+    genai.configure(api_key=selected_key)
+    model = genai.GenerativeModel('gemini-1.5-pro-latest')
+    return model
 
 # --- API Çağrısı Yardımcı Fonksiyonu (Retry ve Key Cycling ile) ---
-def call_gemini_with_retry(model, content, max_retries=len(DEEPL_API_KEY) + 2, initial_delay=3):
+def call_gemini_with_retry(model, content, max_retries=len(API_KEYS) + 2, initial_delay=3):
     """Gemini API'yi çağırır, 429 hatasında anahtar değiştirerek ve bekleyerek tekrar dener."""
     current_model = model
     delay = initial_delay
@@ -100,7 +91,7 @@ def call_gemini_with_retry(model, content, max_retries=len(DEEPL_API_KEY) + 2, i
         except Exception as e:
             if '429' in str(e):
                 add_log(f"429 Hatası (Anahtar Index: {st.session_state.current_api_key_index}). Detay: {e}")
-                st.session_state.current_api_key_index = (st.session_state.current_api_key_index + 1) % len(DEEPL_API_KEY)
+                st.session_state.current_api_key_index = (st.session_state.current_api_key_index + 1) % len(API_KEYS)
                 add_log(f"Sıradaki API anahtarına geçiliyor: Index {st.session_state.current_api_key_index}. {delay}sn bekleniyor...")
                 time.sleep(delay)
                 current_model = configure_gemini(st.session_state.current_api_key_index)
@@ -242,18 +233,7 @@ if uploaded_file:
             "Sonucu bir JSON listesi olarak döndür. Örneğin: "
             "[{'text': 'WHAT DOES IT\nMEAN TO BE\nHUMAN...?', 'box': [100, 780, 210, 970]}]"
         )
-        # Gemini ile sadece detection (tespit) yapılacak, çeviri DeepL ile
-        response_detection = None
-        try:
-            # API anahtarı gereksiz, sadece detection için kullanılacak
-            genai.configure(api_key="dummy")
-            model = genai.GenerativeModel('gemini-1.5-pro-latest')
-            response_detection = model.generate_content([prompt_detection, img])
-        except Exception as e:
-            st.error(f"Gemini ile metin tespiti başarısız: {e}")
-            page['status'] = 'error'
-            page['log'] = f'Gemini detection hatası: {e}'
-            continue
+        response_detection = call_gemini_with_retry(model, [prompt_detection, img])
         text_response = response_detection.text.strip() if response_detection else ""
         text_response = re.sub(r"^```json\s*|^```\s*|\s*```$", "", text_response, flags=re.MULTILINE).strip()
         if not text_response:
