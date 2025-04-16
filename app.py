@@ -189,9 +189,10 @@ def extract_images_from_file(uploaded_file):
 
 # --- Görsel Yükleme ---
 uploaded_file = st.file_uploader(
-    "Dosya yüklemek için buraya sürükleyin veya gözatın (PDF, ZIP, CBZ, CBR, JPG, PNG)",
+    "Bir manga dosyası veya görsel yükleyin (PDF, ZIP, CBZ, CBR, JPG, PNG)",
     type=["pdf", "zip", "cbz", "cbr", "jpg", "jpeg", "png"],
-    help="Bir dosyayı buraya sürükleyebilir veya 'Gözat' butonuna tıklayarak seçebilirsiniz."
+    label_visibility="visible",
+    help="Buraya dosya sürükleyip bırakabilir veya dosya seçebilirsiniz."
 )
 
 if uploaded_file:
