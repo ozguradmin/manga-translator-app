@@ -18,7 +18,7 @@ API_KEYS = st.secrets["API_KEYS"]
 
 # --- Sayfa ve Başlık Ayarları ---
 st.set_page_config(layout="wide")
-st.title("Manga Okuma ve Otomatik Çeviri")
+st.title("Manga Okuma ve Otomatik Çeviri (Gemini)")
 
 # --- Oturum Durumu Başlatma ---
 if 'current_api_key_index' not in st.session_state:
@@ -65,7 +65,7 @@ def configure_gemini(key_index):
         return None
 
 # --- API Çağrısı Yardımcı Fonksiyonu (Retry ve Key Cycling ile) ---
-def call_gemini_with_retry(model, content, max_retries=len(API_KEYS) + 2, initial_delay=3):
+def call_gemini_with_retry(model, content, max_retries=len(API_KEYS) + 2, initial_delay=1):
     """Gemini API'yi çağırır, 429 hatasında anahtar değiştirerek ve bekleyerek tekrar dener."""
     current_model = model
     delay = initial_delay
@@ -130,6 +130,15 @@ def get_optimal_font_size(draw, text, box_width, box_height, font_path="manga_fo
     add_log(f"Font Boyutu Hesaplama Bitti: Son Boyut={best_size}")
     return best_font, best_size, best_wrapped
 
+# --- Gemini API'ye gönderilecek görseli yeniden boyutlandıran fonksiyon ---
+MAX_API_IMAGE_SIZE = 1000
+
+def resize_for_api(img):
+    img_api = img.copy()
+    if img_api.width > MAX_API_IMAGE_SIZE or img_api.height > MAX_API_IMAGE_SIZE:
+        img_api.thumbnail((MAX_API_IMAGE_SIZE, MAX_API_IMAGE_SIZE))
+    return img_api
+
 # --- Dosya Yükleme ve Sayfa Çıkarma ---
 def extract_images_from_file(uploaded_file):
     image_paths = []
@@ -189,10 +198,8 @@ def extract_images_from_file(uploaded_file):
 
 # --- Görsel Yükleme ---
 uploaded_file = st.file_uploader(
-    "Bir manga dosyası veya görsel yükleyin (PDF, ZIP, CBZ, CBR, JPG, PNG) yapımcı: @ozguradmin",
-    type=["pdf", "zip", "cbz", "cbr", "jpg", "jpeg", "png"],
-    label_visibility="visible",
-    help="Buraya dosya sürükleyip bırakabilir veya dosya seçebilirsiniz."
+    "Bir manga dosyası veya görsel yükleyin (PDF, ZIP, CBZ, CBR, JPG, PNG)"
+    # type parametresini kaldırdık!
 )
 
 if uploaded_file:
@@ -214,6 +221,7 @@ if uploaded_file:
             placeholder.image(page['translated_img_path'], use_container_width=True)
             continue
         # --- Gemini ile metin tespiti ve çeviri ---
+        img_api = resize_for_api(img)
         prompt_detection = (
             "Bu görseldeki konuşma balonları veya mantıksal olarak bağlantılı metin grupları gibi metin bloklarını tespit et. "
             "Her blok için: "
@@ -222,7 +230,7 @@ if uploaded_file:
             "Sonucu bir JSON listesi olarak döndür. Örneğin: "
             "[{'text': 'WHAT DOES IT\nMEAN TO BE\nHUMAN...?', 'box': [100, 780, 210, 970]}]"
         )
-        response_detection = call_gemini_with_retry(model, [prompt_detection, img])
+        response_detection = call_gemini_with_retry(model, [prompt_detection, img_api])
         text_response = response_detection.text.strip() if response_detection else ""
         text_response = re.sub(r"^```json\s*|^```\s*|\s*```$", "", text_response, flags=re.MULTILINE).strip()
         if not text_response:
