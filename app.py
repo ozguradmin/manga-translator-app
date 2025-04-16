@@ -10,6 +10,8 @@ import zipfile
 import fitz  # PyMuPDF
 import rarfile
 import base64
+import json
+
 
 # --- API Anahtar Listesi ---
 API_KEYS = [
