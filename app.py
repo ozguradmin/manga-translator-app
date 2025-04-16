@@ -255,14 +255,17 @@ if uploaded_file:
             placeholder.image(img, use_container_width=True)
             placeholder.markdown(f'<div style="position:relative;top:-60px;left:0;width:100%;height:60px;background:rgba(255,0,0,0.2);text-align:center;font-size:18px;">Hata: JSON ayrıştırma hatası: {e}</div>', unsafe_allow_html=True)
             continue
-        # Toplu çeviri (DeepL ile) DEĞİL, her balon için ayrı ayrı çeviri
+        # Her balonun metni birleştirilip DeepL'ye tek parça olarak gönderilecek
         translated_blocks = []
         for item in detected_items:
             metin = item.get('text', '')
+            if isinstance(metin, list):
+                metin = '\n'.join(metin)
+            ceviri = "Çeviri hatası"
             try:
                 ceviri = translate_with_deepl(metin, source_lang="EN", target_lang="TR")
             except Exception as e:
-                ceviri = "Çeviri hatası"
+                pass
             translated_blocks.append(ceviri)
         processed_img = img.convert("RGBA")
         draw = ImageDraw.Draw(processed_img)
