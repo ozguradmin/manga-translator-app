@@ -131,7 +131,10 @@ def get_optimal_font_size(draw, text, box_width, box_height, font_path="manga_fo
     return best_font, best_size, best_wrapped
 
 # --- Görsel Yükleme ---
-uploaded_file = st.file_uploader("Bir manga dosyası veya görsel yükleyin (PDF, ZIP, CBZ, CBR, JPG, PNG)", type=["pdf", "zip", "cbz", "cbr", "jpg", "jpeg", "png"])
+uploaded_file = st.file_uploader(
+    "Bir manga dosyası veya görsel yükleyin (PDF, ZIP, CBZ, CBR, JPG, PNG)"
+    # type parametresini kaldırdık!
+)
 
 if uploaded_file:
     images = extract_images_from_file(uploaded_file)
