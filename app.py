@@ -130,6 +130,15 @@ def get_optimal_font_size(draw, text, box_width, box_height, font_path="manga_fo
     add_log(f"Font Boyutu Hesaplama Bitti: Son Boyut={best_size}")
     return best_font, best_size, best_wrapped
 
+# --- Gemini API'ye gönderilecek görseli yeniden boyutlandıran fonksiyon ---
+MAX_API_IMAGE_SIZE = 1000
+
+def resize_for_api(img):
+    img_api = img.copy()
+    if img_api.width > MAX_API_IMAGE_SIZE or img_api.height > MAX_API_IMAGE_SIZE:
+        img_api.thumbnail((MAX_API_IMAGE_SIZE, MAX_API_IMAGE_SIZE))
+    return img_api
+
 # --- Dosya Yükleme ve Sayfa Çıkarma ---
 def extract_images_from_file(uploaded_file):
     image_paths = []
@@ -360,12 +369,4 @@ if not st.session_state.logs:
     if not API_KEYS:
          add_log("Uygulama başlatıldı. API anahtarları bekleniyor...")
     else:
-         add_log("Uygulama hazır. Görsel bekleniyor...")
-
-MAX_API_IMAGE_SIZE = 1000
-
-def resize_for_api(img):
-    img_api = img.copy()
-    if img_api.width > MAX_API_IMAGE_SIZE or img_api.height > MAX_API_IMAGE_SIZE:
-        img_api.thumbnail((MAX_API_IMAGE_SIZE, MAX_API_IMAGE_SIZE))
-    return img_api 
+         add_log("Uygulama hazır. Görsel bekleniyor...") 
