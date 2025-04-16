@@ -11,6 +11,7 @@ import zipfile
 import fitz  # PyMuPDF
 import rarfile
 import base64
+import tempfile
 
 # --- API Anahtar Listesi ---
 API_KEYS = st.secrets["API_KEYS"]
@@ -131,7 +132,7 @@ def get_optimal_font_size(draw, text, box_width, box_height, font_path="manga_fo
 
 # --- Dosya Yükleme ve Sayfa Çıkarma ---
 def extract_images_from_file(uploaded_file):
-    images = []
+    image_paths = []
     filename = uploaded_file.name.lower()
     if filename.endswith('.pdf'):
         pdf_bytes = uploaded_file.read()
@@ -139,38 +140,52 @@ def extract_images_from_file(uploaded_file):
         for page in doc:
             pix = page.get_pixmap()
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            images.append(img)
+            temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+            img.save(temp, format="PNG")
+            temp.close()
+            image_paths.append(temp.name)
     elif filename.endswith('.zip') or filename.endswith('.cbz'):
         with zipfile.ZipFile(uploaded_file) as archive:
             for name in sorted(archive.namelist()):
                 if name.lower().endswith(('.jpg', '.jpeg', '.png')):
                     img = Image.open(io.BytesIO(archive.read(name))).convert("RGB")
-                    images.append(img)
+                    temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+                    img.save(temp, format="PNG")
+                    temp.close()
+                    image_paths.append(temp.name)
     elif filename.endswith('.rar') or filename.endswith('.cbr'):
-        # Önce ZIP olarak dene (bazı .cbr dosyaları aslında zip'tir)
         try:
             with zipfile.ZipFile(uploaded_file) as archive:
                 for name in sorted(archive.namelist()):
                     if name.lower().endswith(('.jpg', '.jpeg', '.png')):
                         img = Image.open(io.BytesIO(archive.read(name))).convert("RGB")
-                        images.append(img)
-            return images
+                        temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+                        img.save(temp, format="PNG")
+                        temp.close()
+                        image_paths.append(temp.name)
+            return image_paths
         except Exception:
-            uploaded_file.seek(0)  # ZIP denemesi dosya pointer'ını oynatır, sıfırla
+            uploaded_file.seek(0)
             try:
                 with rarfile.RarFile(uploaded_file) as archive:
                     for name in sorted(archive.namelist()):
                         if name.lower().endswith(('.jpg', '.jpeg', '.png')):
                             img = Image.open(io.BytesIO(archive.read(name))).convert("RGB")
-                            images.append(img)
-                return images
+                            temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+                            img.save(temp, format="PNG")
+                            temp.close()
+                            image_paths.append(temp.name)
+                return image_paths
             except Exception as e:
                 st.error("CBR dosyası açılamadı. Dosya bozuk olabilir veya sunucuda RAR desteği yok. Hata: " + str(e))
                 return []
     elif filename.endswith(('.jpg', '.jpeg', '.png')):
         img = Image.open(uploaded_file).convert("RGB")
-        images.append(img)
-    return images
+        temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        img.save(temp, format="PNG")
+        temp.close()
+        image_paths.append(temp.name)
+    return image_paths
 
 # --- Görsel Yükleme ---
 uploaded_file = st.file_uploader(
@@ -178,23 +193,22 @@ uploaded_file = st.file_uploader(
 )
 
 if uploaded_file:
-    images = extract_images_from_file(uploaded_file)
+    image_paths = extract_images_from_file(uploaded_file)
     st.session_state.page_states = {}
     page_placeholders = []
-    for idx, img in enumerate(images):
-        st.session_state.page_states[idx] = {'status': 'pending', 'img': img, 'translated_img': None, 'log': ''}
+    for idx, img_path in enumerate(image_paths):
+        st.session_state.page_states[idx] = {'status': 'pending', 'img_path': img_path, 'translated_img_path': None, 'log': ''}
         page_placeholders.append(st.empty())
 
-    st.success(f"{len(images)} sayfa yüklendi. Çeviri işlemi başlatılıyor...")
+    st.success(f"{len(image_paths)} sayfa yüklendi. Çeviri işlemi başlatılıyor...")
 
     # --- Sayfa Sayfa Çeviri ---
     for idx, page in st.session_state.page_states.items():
-        img = page['img']
+        img = Image.open(page['img_path'])
         placeholder = page_placeholders[idx]
         if page['status'] == 'done':
-            # Zaten çevrilmişse göster
             placeholder.markdown(f"### Sayfa {idx+1}")
-            placeholder.image(page['translated_img'], use_container_width=True)
+            placeholder.image(page['translated_img_path'], use_container_width=True)
             continue
         # --- Gemini ile metin tespiti ve çeviri ---
         prompt_detection = (
@@ -268,12 +282,16 @@ if uploaded_file:
             text_x = left + (text_box_width - text_width) / 2
             text_y = top + (text_box_height - text_height) / 2
             draw.multiline_text((text_x, text_y), wrapped, fill=(0,0,0,255), font=font, spacing=4, align="center")
-        page['translated_img'] = processed_img.convert("RGB")
+        # Çevrilen görseli tekrar temp dosyaya kaydet
+        temp_trans = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+        processed_img.convert("RGB").save(temp_trans, format="PNG")
+        temp_trans.close()
+        page['translated_img_path'] = temp_trans.name
         page['status'] = 'done'
         page['log'] = 'Çeviri tamamlandı.'
         # Çevrilen sayfayı hemen göster (base64 ile birleşik gösterim)
         buffered = io.BytesIO()
-        page['translated_img'].save(buffered, format="PNG")
+        processed_img.save(buffered, format="PNG")
         img_str = base64.b64encode(buffered.getvalue()).decode()
         placeholder.markdown(f"<img src='data:image/png;base64,{img_str}' style='display:block;margin:0;padding:0;border:none;width:100%;'>", unsafe_allow_html=True)
 
@@ -281,15 +299,17 @@ if uploaded_file:
     for idx, page in st.session_state.page_states.items():
         if page['status'] == 'pending':
             page_placeholders[idx].markdown(f"### Sayfa {idx+1}")
+            img = Image.open(page['img_path'])
             buffered = io.BytesIO()
-            page['img'].save(buffered, format="PNG")
+            img.save(buffered, format="PNG")
             img_str = base64.b64encode(buffered.getvalue()).decode()
             page_placeholders[idx].markdown(f"<img src='data:image/png;base64,{img_str}' style='display:block;margin:0;padding:0;border:none;width:100%;'>", unsafe_allow_html=True)
             page_placeholders[idx].markdown('<div style="position:relative;top:-60px;left:0;width:100%;height:60px;background:rgba(255,255,255,0.7);text-align:center;font-size:24px;">Henüz çevrilmedi, lütfen bekleyin...</div>', unsafe_allow_html=True)
         elif page['status'] == 'error':
             page_placeholders[idx].markdown(f"### Sayfa {idx+1}")
+            img = Image.open(page['img_path'])
             buffered = io.BytesIO()
-            page['img'].save(buffered, format="PNG")
+            img.save(buffered, format="PNG")
             img_str = base64.b64encode(buffered.getvalue()).decode()
             page_placeholders[idx].markdown(f"<img src='data:image/png;base64,{img_str}' style='display:block;margin:0;padding:0;border:none;width:100%;'>", unsafe_allow_html=True)
             page_placeholders[idx].markdown(f'<div style="position:relative;top:-60px;left:0;width:100%;height:60px;background:rgba(255,0,0,0.2);text-align:center;font-size:18px;">Hata: {page["log"]}</div>', unsafe_allow_html=True)
@@ -299,8 +319,8 @@ if uploaded_file:
         from PIL import Image
         pdf_pages = []
         for idx, page in st.session_state.page_states.items():
-            if page['status'] == 'done' and page['translated_img'] is not None:
-                img = page['translated_img']
+            if page['status'] == 'done' and page['translated_img_path'] is not None:
+                img = Image.open(page['translated_img_path'])
                 if img.mode != 'RGB':
                     img = img.convert('RGB')
                 pdf_pages.append(img)
@@ -311,7 +331,7 @@ if uploaded_file:
         pdf_buffer.seek(0)
         return pdf_buffer
 
-    done_count = sum(1 for page in st.session_state.page_states.values() if page['status'] == 'done' and page['translated_img'] is not None)
+    done_count = sum(1 for page in st.session_state.page_states.values() if page['status'] == 'done' and page['translated_img_path'] is not None)
     total_count = len(st.session_state.page_states)
     st.markdown(f"<div style='font-size:13px;color:#888;margin-bottom:4px;'>Çevrilen: {done_count} / Toplam: {total_count}</div>", unsafe_allow_html=True)
     pdf_buffer = create_pdf_of_translated_pages()
