@@ -18,7 +18,7 @@ API_KEYS = st.secrets["API_KEYS"]
 
 # --- Sayfa ve Başlık Ayarları ---
 st.set_page_config(layout="wide")
-st.title("Manga Okuma ve Otomatik Çeviri (Gemini)")
+st.title("Manga Okuma ve Otomatik Çeviri (ozguradmin)")
 
 # --- Oturum Durumu Başlatma ---
 if 'current_api_key_index' not in st.session_state:
@@ -55,7 +55,7 @@ def configure_gemini(key_index):
     try:
         selected_key = API_KEYS[key_index]
         genai.configure(api_key=selected_key)
-        model = genai.GenerativeModel('gemini-1.5-pro-latest')
+        model = genai.GenerativeModel('gemini-2.5-pro-preview-03-25')
         add_log(f"Gemini API yapılandırıldı. Anahtar Index: {key_index} (***{selected_key[-4:]})")
         # Aktif anahtar gösterimini güncelle (opsiyonel)
         # api_key_display.text_input("Aktif API Anahtarı", value=selected_key[:8] + "...", disabled=True, key=f"api_disp_{key_index}")
