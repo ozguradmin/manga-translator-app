@@ -55,7 +55,7 @@ def configure_gemini(key_index):
     try:
         selected_key = API_KEYS[key_index]
         genai.configure(api_key=selected_key)
-        model = genai.GenerativeModel('gemini-2.0-flash')
+        model = genai.GenerativeModel('gemini-2.5-pro-exp-03-25')
         add_log(f"Gemini API yapılandırıldı. Anahtar Index: {key_index} (***{selected_key[-4:]})")
         # Aktif anahtar gösterimini güncelle (opsiyonel)
         # api_key_display.text_input("Aktif API Anahtarı", value=selected_key[:8] + "...", disabled=True, key=f"api_disp_{key_index}")
