@@ -1,6 +1,6 @@
 import streamlit as st
 import google.generativeai as genai
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFont
 import io
 import json
 import os
@@ -135,17 +135,8 @@ MAX_API_IMAGE_SIZE = 1000
 
 def resize_for_api(img):
     img_api = img.copy()
-    w, h = img_api.size
-    if w > h:
-        if w > MAX_API_IMAGE_SIZE:
-            new_w = MAX_API_IMAGE_SIZE
-            new_h = int(h * (MAX_API_IMAGE_SIZE / w))
-            img_api = img_api.resize((new_w, new_h), Image.LANCZOS)
-    else:
-        if h > MAX_API_IMAGE_SIZE:
-            new_h = MAX_API_IMAGE_SIZE
-            new_w = int(w * (MAX_API_IMAGE_SIZE / h))
-            img_api = img_api.resize((new_w, new_h), Image.LANCZOS)
+    if img_api.width > MAX_API_IMAGE_SIZE or img_api.height > MAX_API_IMAGE_SIZE:
+        img_api.thumbnail((MAX_API_IMAGE_SIZE, MAX_API_IMAGE_SIZE))
     return img_api
 
 # --- Dosya Yükleme ve Sayfa Çıkarma ---
@@ -229,7 +220,7 @@ if uploaded_file:
         placeholder = page_placeholders[idx]
         if page['status'] == 'done':
             placeholder.markdown(f"### Sayfa {idx+1}")
-            placeholder.image(page['translated_img_path'], use_container_width=True)
+            placeholder.image(page['translated_img_path'])
             continue
         # --- Gemini ile metin tespiti ve çeviri ---
         img_api = resize_for_api(img)
@@ -249,7 +240,7 @@ if uploaded_file:
             page['log'] = 'Gemini API yanıtı boş geldi.'
             add_log('UYARI: Gemini API yanıtı boş geldi, JSON ayrıştırma yapılmadı.')
             placeholder.markdown(f"### Sayfa {idx+1}")
-            placeholder.image(img, use_container_width=True)
+            placeholder.image(img)
             placeholder.markdown('<div style="position:relative;top:-60px;left:0;width:100%;height:60px;background:rgba(255,0,0,0.2);text-align:center;font-size:18px;">Hata: Gemini API yanıtı boş geldi.</div>', unsafe_allow_html=True)
             continue
         cleaned_json_str = re.sub(r",\s*([}\]])", r"\1", text_response)
@@ -260,7 +251,7 @@ if uploaded_file:
             page['log'] = f'JSON ayrıştırma hatası: {e}'
             add_log(f'HATA: JSON ayrıştırma hatası: {e}\nYanıt: {cleaned_json_str}')
             placeholder.markdown(f"### Sayfa {idx+1}")
-            placeholder.image(img, use_container_width=True)
+            placeholder.image(img)
             placeholder.markdown(f'<div style="position:relative;top:-60px;left:0;width:100%;height:60px;background:rgba(255,0,0,0.2);text-align:center;font-size:18px;">Hata: JSON ayrıştırma hatası: {e}</div>', unsafe_allow_html=True)
             continue
         # Toplu çeviri
@@ -272,7 +263,7 @@ if uploaded_file:
             page['status'] = 'error'
             page['log'] = 'Çeviri başarısız.'
             placeholder.markdown(f"### Sayfa {idx+1}")
-            placeholder.image(img, use_container_width=True)
+            placeholder.image(img)
             placeholder.markdown('<div style="position:relative;top:-60px;left:0;width:100%;height:60px;background:rgba(255,0,0,0.2);text-align:center;font-size:18px;">Hata: Çeviri başarısız.</div>', unsafe_allow_html=True)
             continue
         translated_text = response_translation.text.strip()
@@ -315,7 +306,7 @@ if uploaded_file:
         buffered = io.BytesIO()
         processed_img.save(buffered, format="PNG")
         img_str = base64.b64encode(buffered.getvalue()).decode()
-        placeholder.markdown(f"<img src='data:image/png;base64,{img_str}' style='display:block;margin:0;padding:0;border:none;width:100%;'>", unsafe_allow_html=True)
+        placeholder.markdown(f"<img src='data:image/png;base64,{img_str}' style='display:block;margin:0;padding:0;border:none;max-width:100%;height:auto;'>", unsafe_allow_html=True)
 
     # Henüz çevrilmeyen sayfalar için overlay göster (base64 ile)
     for idx, page in st.session_state.page_states.items():
@@ -325,7 +316,7 @@ if uploaded_file:
             buffered = io.BytesIO()
             img.save(buffered, format="PNG")
             img_str = base64.b64encode(buffered.getvalue()).decode()
-            page_placeholders[idx].markdown(f"<img src='data:image/png;base64,{img_str}' style='display:block;margin:0;padding:0;border:none;width:100%;'>", unsafe_allow_html=True)
+            page_placeholders[idx].markdown(f"<img src='data:image/png;base64,{img_str}' style='display:block;margin:0;padding:0;border:none;max-width:100%;height:auto;'>", unsafe_allow_html=True)
             page_placeholders[idx].markdown('<div style="position:relative;top:-60px;left:0;width:100%;height:60px;background:rgba(255,255,255,0.7);text-align:center;font-size:24px;">Henüz çevrilmedi, lütfen bekleyin...</div>', unsafe_allow_html=True)
         elif page['status'] == 'error':
             page_placeholders[idx].markdown(f"### Sayfa {idx+1}")
@@ -333,7 +324,7 @@ if uploaded_file:
             buffered = io.BytesIO()
             img.save(buffered, format="PNG")
             img_str = base64.b64encode(buffered.getvalue()).decode()
-            page_placeholders[idx].markdown(f"<img src='data:image/png;base64,{img_str}' style='display:block;margin:0;padding:0;border:none;width:100%;'>", unsafe_allow_html=True)
+            page_placeholders[idx].markdown(f"<img src='data:image/png;base64,{img_str}' style='display:block;margin:0;padding:0;border:none;max-width:100%;height:auto;'>", unsafe_allow_html=True)
             page_placeholders[idx].markdown(f'<div style="position:relative;top:-60px;left:0;width:100%;height:60px;background:rgba(255,0,0,0.2);text-align:center;font-size:18px;">Hata: {page["log"]}</div>', unsafe_allow_html=True)
 
     # --- İNDİRME BUTONU (her zaman en altta ve her zaman göster, PDF olarak) ---
