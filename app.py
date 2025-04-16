@@ -12,7 +12,6 @@ import fitz  # PyMuPDF
 import rarfile
 import base64
 import tempfile
-import math
 
 # --- API Anahtar Listesi ---
 API_KEYS = st.secrets["API_KEYS"]
@@ -133,49 +132,11 @@ def get_optimal_font_size(draw, text, box_width, box_height, font_path="manga_fo
 
 # --- Gemini API'ye gönderilecek görseli yeniden boyutlandıran fonksiyon ---
 MAX_API_IMAGE_SIZE = 1000
-MAX_PIXELS = 1000 * 1000  # Toplam piksel sayısı sınırı
 
 def resize_for_api(img):
-    """Görüntünün oranına göre akıllı boyutlandırma yapar.
-    İnce/uzun görseller için daha fazla piksel korunur."""
     img_api = img.copy()
-    width, height = img_api.size
-    
-    # Görsel zaten küçükse dokunma
-    if width <= MAX_API_IMAGE_SIZE and height <= MAX_API_IMAGE_SIZE:
-        return img_api
-    
-    # En-boy oranını hesapla
-    ratio = width / height
-    
-    if ratio > 2.5 or ratio < 0.4:  # Çok ince/uzun görsel (yatay veya dikey)
-        # İnce/uzun görseller için daha yüksek bir sınır belirleyelim
-        # Toplam piksel sayısı sınırını koruyarak
-        if width > height:  # Yatay uzun görsel
-            new_width = min(width, int(1.5 * MAX_API_IMAGE_SIZE))
-            new_height = min(int(new_width / ratio), MAX_API_IMAGE_SIZE)
-            
-            # Toplam piksel kontrolü
-            if new_width * new_height > MAX_PIXELS:
-                scale = math.sqrt(MAX_PIXELS / (new_width * new_height))
-                new_width = int(new_width * scale)
-                new_height = int(new_height * scale)
-        else:  # Dikey uzun görsel
-            new_height = min(height, int(1.5 * MAX_API_IMAGE_SIZE))
-            new_width = min(int(new_height * ratio), MAX_API_IMAGE_SIZE)
-            
-            # Toplam piksel kontrolü
-            if new_width * new_height > MAX_PIXELS:
-                scale = math.sqrt(MAX_PIXELS / (new_width * new_height))
-                new_width = int(new_width * scale)
-                new_height = int(new_height * scale)
-        
-        img_api = img_api.resize((new_width, new_height), Image.LANCZOS)
-    else:  # Normal görsel
-        # Normal boyutlandırma algoritması
-        if width > MAX_API_IMAGE_SIZE or height > MAX_API_IMAGE_SIZE:
-            img_api.thumbnail((MAX_API_IMAGE_SIZE, MAX_API_IMAGE_SIZE))
-    
+    if img_api.width > MAX_API_IMAGE_SIZE or img_api.height > MAX_API_IMAGE_SIZE:
+        img_api.thumbnail((MAX_API_IMAGE_SIZE, MAX_API_IMAGE_SIZE))
     return img_api
 
 # --- Dosya Yükleme ve Sayfa Çıkarma ---
@@ -237,10 +198,8 @@ def extract_images_from_file(uploaded_file):
 
 # --- Görsel Yükleme ---
 uploaded_file = st.file_uploader(
-    "Bir manga dosyası veya görsel yükleyin (PDF, ZIP, CBZ, CBR, JPG, PNG)",
-    type=["pdf", "zip", "cbz", "cbr", "jpg", "jpeg", "png"],
-    label_visibility="visible",
-    help="Buraya dosya sürükleyip bırakabilir veya dosya seçebilirsiniz."
+    "Bir manga dosyası veya görsel yükleyin (PDF, ZIP, CBZ, CBR, JPG, PNG)"
+    # type parametresini kaldırdık!
 )
 
 if uploaded_file:
