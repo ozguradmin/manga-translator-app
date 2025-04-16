@@ -1,6 +1,6 @@
 import streamlit as st
 import google.generativeai as genai
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 import io
 import json
 import os
@@ -131,23 +131,30 @@ def get_optimal_font_size(draw, text, box_width, box_height, font_path="manga_fo
     return best_font, best_size, best_wrapped
 
 # --- Gemini API'ye gönderilecek görseli yeniden boyutlandıran fonksiyon ---
+from PIL import ImageOps
 MAX_API_IMAGE_SIZE = 1000
+MIN_ASPECT_RATIO = 0.6   # Çok dar ise padding uygula
+MAX_ASPECT_RATIO = 1.8   # Çok uzun ise padding uygula
 
 def resize_for_api(img):
     img_api = img.copy()
+    aspect_ratio = img_api.width / img_api.height
+    if aspect_ratio < MIN_ASPECT_RATIO:
+        # Çok dar, yanlara padding ekle
+        new_width = int(img_api.height * MIN_ASPECT_RATIO)
+        result = Image.new("RGB", (new_width, img_api.height), (255,255,255))
+        result.paste(img_api, ((new_width - img_api.width)//2, 0))
+        img_api = result
+    elif aspect_ratio > MAX_ASPECT_RATIO:
+        # Çok uzun, üst-alt padding ekle
+        new_height = int(img_api.width / MAX_ASPECT_RATIO)
+        result = Image.new("RGB", (img_api.width, new_height), (255,255,255))
+        result.paste(img_api, (0, (new_height - img_api.height)//2))
+        img_api = result
+    # Sonra boyutlandır
     if img_api.width > MAX_API_IMAGE_SIZE or img_api.height > MAX_API_IMAGE_SIZE:
         img_api.thumbnail((MAX_API_IMAGE_SIZE, MAX_API_IMAGE_SIZE))
     return img_api
-
-# --- Görseli kareye tamamlayan padding fonksiyonu ---
-def pad_to_square(img, color=(255,255,255)):
-    w, h = img.size
-    if w == h:
-        return img
-    size = max(w, h)
-    new_img = Image.new("RGB", (size, size), color)
-    new_img.paste(img, ((size - w) // 2, (size - h) // 2))
-    return new_img
 
 # --- Dosya Yükleme ve Sayfa Çıkarma ---
 def extract_images_from_file(uploaded_file):
@@ -233,7 +240,7 @@ if uploaded_file:
             placeholder.image(page['translated_img_path'], use_container_width=True)
             continue
         # --- Gemini ile metin tespiti ve çeviri ---
-        img_api = pad_to_square(resize_for_api(img))
+        img_api = resize_for_api(img)
         prompt_detection = (
             "Bu görseldeki konuşma balonları veya mantıksal olarak bağlantılı metin grupları gibi metin bloklarını tespit et. "
             "Her blok için: "
